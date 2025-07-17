@@ -2,58 +2,68 @@ import feedparser
 import requests
 import time
 import os
-from datetime import datetime
 
-# تنظیمات
-RSS_FEED_URL = "https://www.khabaronline.ir/rss?cat=3"  # اقتصاد کلان به‌عنوان نمونه
+RSS_FEED_URL = "https://www.khabaronline.ir/rss?cat=3"
 BOT_TOKEN = os.getenv("BALA_BOT_TOKEN")
 CHANNEL_ID = os.getenv("BALA_CHANNEL_ID")
-MAX_SUMMARY_LENGTH = 300  # حداکثر تعداد کاراکتر خلاصه
-FETCH_INTERVAL = 1800  # هر 30 دقیقه یک بار بررسی فید
+MAX_SUMMARY_LENGTH = 300
+FETCH_INTERVAL = 1800
 
-sent_links = set()
+SENT_LINKS_FILE = "sent_links.txt"
 
-# تابع خلاصه‌سازی ساده
+def load_sent_links():
+    if not os.path.exists(SENT_LINKS_FILE):
+        return set()
+    with open(SENT_LINKS_FILE, "r") as f:
+        return set(line.strip() for line in f if line.strip())
+
+def save_sent_link(link):
+    with open(SENT_LINKS_FILE, "a") as f:
+        f.write(link + "\n")
+
 def summarize(text, max_length):
     if len(text) <= max_length:
         return text
     return text[:max_length].rsplit(".", 1)[0] + "..."
 
-# تابع ارسال پیام به بله
 def send_to_bale(text):
     url = f"https://tapi.bale.ai/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHANNEL_ID,
-        "text": text
-    }
+    payload = {"chat_id": CHANNEL_ID, "text": text}
     try:
         response = requests.post(url, json=payload)
         response.raise_for_status()
         print("✅ پیام با موفقیت ارسال شد.")
+        return True
     except Exception as e:
         print(f"❌ خطا در ارسال پیام به بله: {e}")
+        return False
 
-# حلقه اصلی
-while True:
-    try:
-        feed = feedparser.parse(RSS_FEED_URL)
-        for entry in feed.entries:
-            link = entry.link
-            if link in sent_links:
-                continue
+def main():
+    sent_links = load_sent_links()
+    while True:
+        try:
+            feed = feedparser.parse(RSS_FEED_URL)
+            for entry in feed.entries:
+                link = entry.link
+                if link in sent_links:
+                    continue
 
-            title = entry.title.strip()
-            summary = summarize(entry.summary.strip(), MAX_SUMMARY_LENGTH)
-            published = entry.published if 'published' in entry else ''
+                title = entry.title.strip()
+                summary = summarize(entry.summary.strip(), MAX_SUMMARY_LENGTH)
+                published = entry.published if 'published' in entry else ''
 
-            message = f"📌 {title}\n\n📝 {summary}\n\n🕒 {published}"
-            send_to_bale(message)
-            sent_links.add(link)
-            time.sleep(5)
-    
-        print(f"🔁 بررسی مجدد در {FETCH_INTERVAL//60} دقیقه...")
-        time.sleep(FETCH_INTERVAL)
+                message = f"📌 {title}\n\n📝 {summary}\n\n🕒 {published}"
+                if send_to_bale(message):
+                    sent_links.add(link)
+                    save_sent_link(link)
+                time.sleep(5)
+            
+            print(f"🔁 بررسی مجدد در {FETCH_INTERVAL//60} دقیقه...")
+            time.sleep(FETCH_INTERVAL)
 
-    except Exception as e:
-        print(f"💥 خطا در اجرای ربات: {e}")
-        time.sleep(60)
+        except Exception as e:
+            print(f"💥 خطا در اجرای ربات: {e}")
+            time.sleep(60)
+
+if __name__ == "__main__":
+    main()
