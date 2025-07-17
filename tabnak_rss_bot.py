@@ -1,39 +1,59 @@
-# tabnak_rss_bot.py
-
-import requests
 import feedparser
+import requests
+import time
 import os
-from dotenv import load_dotenv
+from datetime import datetime
 
-load_dotenv()
-BOT_TOKEN = os.getenv("BALE_BOT_TOKEN")
-CHANNEL_ID = os.getenv("BALE_CHANNEL_ID")
+# تنظیمات
+RSS_FEED_URL = "https://www.khabaronline.ir/rss?cat=3"  # اقتصاد کلان به‌عنوان نمونه
+BOT_TOKEN = os.getenv("BALA_BOT_TOKEN")
+CHANNEL_ID = os.getenv("BALA_CHANNEL_ID")
+MAX_SUMMARY_LENGTH = 300  # حداکثر تعداد کاراکتر خلاصه
+FETCH_INTERVAL = 1800  # هر 30 دقیقه یک بار بررسی فید
 
-RSS_URL = "https://www.tabnak.ir/fa/rss/3/mostvisited"  # اقتصادی
+sent_links = set()
 
-def fetch_tabnak_economy_rss():
-    feed = feedparser.parse(RSS_URL)
-    posts = []
-    for entry in feed.entries[:5]:  # فقط ۵ خبر اول
-        title = entry.title
-        link = entry.link
-        summary = entry.summary
-        content = f"📌 {title}\n{summary.strip()}\n\n🔗 ادامه خبر:\n{link}\n\n📣 منبع: [کانال نوین ابزار]({SOURCE_LINK})"
-        posts.append(content)
-    return posts
+# تابع خلاصه‌سازی ساده
+def summarize(text, max_length):
+    if len(text) <= max_length:
+        return text
+    return text[:max_length].rsplit(".", 1)[0] + "..."
 
-def send_to_bale(message):
+# تابع ارسال پیام به بله
+def send_to_bale(text):
     url = f"https://tapi.bale.ai/bot{BOT_TOKEN}/sendMessage"
-    data = {
+    payload = {
         "chat_id": CHANNEL_ID,
-        "text": message,
-        "parse_mode": "Markdown"
+        "text": text
     }
-    resp = requests.post(url, json=data)
-    print(resp.status_code, resp.text)
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        print("✅ پیام با موفقیت ارسال شد.")
+    except Exception as e:
+        print(f"❌ خطا در ارسال پیام به بله: {e}")
 
-if __name__ == "__main__":
-    SOURCE_LINK = "https://web.bale.ai/chat?uid=6100393162"
-    posts = fetch_tabnak_economy_rss()
-    for post in posts:
-        send_to_bale(post)
+# حلقه اصلی
+while True:
+    try:
+        feed = feedparser.parse(RSS_FEED_URL)
+        for entry in feed.entries:
+            link = entry.link
+            if link in sent_links:
+                continue
+
+            title = entry.title.strip()
+            summary = summarize(entry.summary.strip(), MAX_SUMMARY_LENGTH)
+            published = entry.published if 'published' in entry else ''
+
+            message = f"📌 {title}\n\n📝 {summary}\n\n🕒 {published}"
+            send_to_bale(message)
+            sent_links.add(link)
+            time.sleep(5)
+    
+        print(f"🔁 بررسی مجدد در {FETCH_INTERVAL//60} دقیقه...")
+        time.sleep(FETCH_INTERVAL)
+
+    except Exception as e:
+        print(f"💥 خطا در اجرای ربات: {e}")
+        time.sleep(60)
