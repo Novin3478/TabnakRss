@@ -1,24 +1,24 @@
+from flask import Flask, request, jsonify
 import feedparser
 import requests
-import time
 import os
+
+app = Flask(__name__)
 
 RSS_FEED_URL = "https://www.khabaronline.ir/rss?cat=3"
 BOT_TOKEN = os.getenv("BALA_BOT_TOKEN")
 CHANNEL_ID = os.getenv("BALA_CHANNEL_ID")
 MAX_SUMMARY_LENGTH = 300
-FETCH_INTERVAL = 1800
-
-SENT_LINKS_FILE = "sent_links.txt"
+sent_links_file = "sent_links.txt"
 
 def load_sent_links():
-    if not os.path.exists(SENT_LINKS_FILE):
+    if not os.path.exists(sent_links_file):
         return set()
-    with open(SENT_LINKS_FILE, "r") as f:
+    with open(sent_links_file, "r") as f:
         return set(line.strip() for line in f if line.strip())
 
 def save_sent_link(link):
-    with open(SENT_LINKS_FILE, "a") as f:
+    with open(sent_links_file, "a") as f:
         f.write(link + "\n")
 
 def summarize(text, max_length):
@@ -38,32 +38,32 @@ def send_to_bale(text):
         print(f"❌ خطا در ارسال پیام به بله: {e}")
         return False
 
-def main():
+@app.route("/run", methods=["GET"])
+def run_bot():
     sent_links = load_sent_links()
-    while True:
-        try:
-            feed = feedparser.parse(RSS_FEED_URL)
-            for entry in feed.entries:
-                link = entry.link
-                if link in sent_links:
-                    continue
+    sent_count = 0
+    try:
+        feed = feedparser.parse(RSS_FEED_URL)
+        for entry in feed.entries:
+            link = entry.link
+            if link in sent_links:
+                continue
 
-                title = entry.title.strip()
-                summary = summarize(entry.summary.strip(), MAX_SUMMARY_LENGTH)
-                published = entry.published if 'published' in entry else ''
+            title = entry.title.strip()
+            summary = summarize(entry.summary.strip(), MAX_SUMMARY_LENGTH)
+            published = entry.published if 'published' in entry else ''
 
-                message = f"📌 {title}\n\n📝 {summary}\n\n🕒 {published}"
-                if send_to_bale(message):
-                    sent_links.add(link)
-                    save_sent_link(link)
-                time.sleep(5)
-            
-            print(f"🔁 بررسی مجدد در {FETCH_INTERVAL//60} دقیقه...")
-            time.sleep(FETCH_INTERVAL)
+            message = f"📌 {title}\n\n📝 {summary}\n\n🕒 {published}"
+            if send_to_bale(message):
+                sent_links.add(link)
+                save_sent_link(link)
+                sent_count += 1
 
-        except Exception as e:
-            print(f"💥 خطا در اجرای ربات: {e}")
-            time.sleep(60)
+        return jsonify({"status": "success", "sent": sent_count})
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
-    main()
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
